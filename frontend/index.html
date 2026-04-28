@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NeuroNote</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- jsPDF CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header>
+      <div>
+        <h1>🧠 NeuroNote</h1>
+        <p>AI EHR Summarizer</p>
+      </div>
+      <span id="status">● Disconnected</span>
+    </header>
+
+    <!-- Main -->
+    <div class="container">
+
+      <!-- Input Panel -->
+      <div class="panel">
+        <h2>📄 EHR Input</h2>
+        <textarea id="ehrInput" placeholder="Paste patient EHR data here..."></textarea>
+        <button id="summarizeBtn">Generate Summary</button>
+      </div>
+
+      <!-- Output Panel -->
+      <div class="panel">
+        <h2>📊 Summary</h2>
+        
+        <div id="output"></div>
+        <button id="downloadPdfBtn">⬇️ Download PDF</button>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
