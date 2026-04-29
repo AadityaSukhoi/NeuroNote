@@ -1,0 +1,5 @@
+.github/copilot-instructions.md
+venv
+logs/
+__pycache__/
+.env
