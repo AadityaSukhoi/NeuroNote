@@ -1,47 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>NeuroNote</title>
-  <link rel="stylesheet" href="styles.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroNote | Minimalist EHR Synthesis</title>
+    <link rel="stylesheet" href="styles.css">
 
-  <!-- jsPDF CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-
 <body>
-  <div class="app">
 
-    <!-- Header -->
-    <header>
-      <div>
-        <h1>🧠 NeuroNote</h1>
-        <p>AI EHR Summarizer</p>
-      </div>
-      <span id="status">● Disconnected</span>
-    </header>
-
-    <!-- Main -->
-    <div class="container">
-
-      <!-- Input Panel -->
-      <div class="panel">
-        <h2>📄 EHR Input</h2>
-        <textarea id="ehrInput" placeholder="Paste patient EHR data here..."></textarea>
-        <button id="summarizeBtn">Generate Summary</button>
-      </div>
-
-      <!-- Output Panel -->
-      <div class="panel">
-        <h2>📊 Summary</h2>
-        
-        <div id="output"></div>
-        <button id="downloadPdfBtn">⬇️ Download PDF</button>
-      </div>
-
+<header class="aura-nav">
+    <div class="logo">NEURONOTE</div>
+    <div class="system-status">
+        <span id="status-text">Ready</span>
+        <div id="status-indicator"></div>
     </div>
-  </div>
+</header>
 
-  <script src="script.js"></script>
+<main class="workspace">
+
+    <!-- INPUT -->
+    <div id="input-layer" class="layer active">
+        <div class="editor-shell">
+            <div id="ehr-input" class="minimal-editor" contenteditable="true"
+                 data-placeholder="Enter patient records..."></div>
+
+            <div class="action-row">
+                <button id="cta-btn" onclick="processEHR()">
+                    <span>Synthesize</span>
+                    <i data-lucide="arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESULT -->
+    <div id="result-layer" class="layer">
+        <div class="synthesis-grid">
+
+            <!-- SUMMARY -->
+            <div class="report-container">
+                <header class="report-header">
+                    <span class="label">Clinical Abstract</span>
+
+                    <div class="report-tools">
+                        <button onclick="copyText()"><i data-lucide="copy"></i></button>
+                        <button onclick="window.print()"><i data-lucide="printer"></i></button>
+                    </div>
+                </header>
+
+                <article id="markdown-output"></article>
+            </div>
+
+            <!-- ENTITIES -->
+            <aside class="meta-sidebar">
+                <div class="meta-block">
+                    <span class="meta-label">Detected Entities</span>
+                    <div id="entity-cloud"></div>
+                </div>
+            </aside>
+
+        </div>
+
+        <button class="reset-link" onclick="location.reload()">Begin New Entry</button>
+    </div>
+
+</main>
+
+<script src="script.js"></script>
 </body>
 </html>

@@ -1,28 +1,22 @@
 """
 main.py
 
-Description:
-    Entry point for NeuroNote FastAPI backend.
-    Includes REST + WebSocket streaming.
-
-Author: Aaditya Ranjan Moitra
+FastAPI entrypoint with WebSocket streaming + NER push.
+Robust version with error handling + debug logging + done signal.
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
+import json
 
-from summarization_api import router as summarization_router
 from llm_service import generate_summary_stream
+from nlp_pipeline import preprocess_ehr
 from logger import logger
 
-app = FastAPI(
-    title="NeuroNote EHR Summarizer API",
-    description="AI-powered summarization of Electronic Health Records (EHRs).",
-    version="2.0.0"
-)
+app = FastAPI(title="NeuroNote API")
 
-# CORS (important for frontend)
+# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,43 +25,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    logger.info("Root endpoint accessed.")
-    return {"message": "Welcome to NeuroNote API!"}
-
-
-# REST routes
-app.include_router(summarization_router, prefix="/summarize")
-
-
-# ------------------ WebSocket Streaming ------------------
+# ---------------- WEBSOCKET ----------------
 @app.websocket("/ws/summarize")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint for streaming summaries.
-    """
     await websocket.accept()
 
     try:
         while True:
-            ehr_text = await websocket.receive_text()
+            data = await websocket.receive_text()
+            logger.info("Received EHR via WS")
 
-            logger.info(f"WebSocket request received ({len(ehr_text)} chars)")
+            try:
+                parsed = json.loads(data)
+                ehr_text = parsed.get("text", "")
+            except Exception:
+                ehr_text = data 
 
-            async for token in generate_summary_stream(ehr_text):
-                await websocket.send_text(token)
+            # ---------- NLP ----------
+            processed, entities = await run_in_threadpool(preprocess_ehr, ehr_text)
+
+            logger.info(f"Entities extracted: {entities}")
+
+            # Send entities FIRST
+            await websocket.send_text(json.dumps({
+                "type": "entities",
+                "data": entities
+            }))
+
+            # ---------- LLM STREAM ----------
+            logger.info("Starting summary stream...")
+
+            token_sent = False
+
+            try:
+                async for token in generate_summary_stream(processed):
+                    if token:
+                        token_sent = True
+                        await websocket.send_text(json.dumps({
+                            "type": "token",
+                            "data": token
+                        }))
+
+                if not token_sent:
+                    await websocket.send_text(json.dumps({
+                        "type": "token",
+                        "data": "[No summary generated]"
+                    }))
+
+            except Exception as e:
+                logger.error(f"Streaming error: {e}")
+
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "data": str(e)
+                }))
+
+            # ---------- DONE SIGNAL ----------
+            await websocket.send_text(json.dumps({
+                "type": "done"
+            }))
 
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected.")
-        await websocket.close()
-
-
-# ------------------ Error Handler ------------------
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled error: {exc}")
-    return JSONResponse(status_code=500, content={"error": str(exc)})
+        logger.info("WS disconnected")

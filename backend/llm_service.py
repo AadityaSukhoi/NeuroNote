@@ -1,38 +1,35 @@
 """
 llm_service.py
 
-Description:
-    Handles LLM inference for NeuroNote.
-    Uses Granite (Ollama) as primary and Gemini as fallback.
-
-Author: Aaditya Ranjan Moitra
+Gemini → Granite fallback
+Using new Google Gen AI SDK (google-genai)
 """
 
 import os
+import asyncio
 from dotenv import load_dotenv
 from logger import logger
-
-import ollama
 from google import genai
 
-from nlp_pipeline import preprocess_ehr
+import ollama
 
 load_dotenv()
 
 MODEL_NAME = "granite3.2:8b"
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 
 def build_prompt(processed_text: str) -> str:
-    """Build strict prompt."""
     return f"""
 STRICT RULES:
-- Output ONLY bullet points
-- Each line MUST start with "- "
-- No "*"
-- No paragraphs
+- Output ONLY markdown
+- Each bullet MUST start with "- "
+- No nested bullets
+- Use headings like ## Patient Overview
 
-You are NeuroNote, an AI clinical assistant summarizing EHRs.
+You are NeuroNote.
 
 {processed_text}
 
@@ -40,15 +37,45 @@ Generate summary:
 """
 
 
-async def granite_stream(ehr_text: str):
-    """Stream from Granite."""
-    processed = preprocess_ehr(ehr_text)
-    prompt = build_prompt(processed)
+# ---------------- GEMINI ----------------
+async def gemini_stream(processed_text: str):
+    """
+    Gemini sync SDK is blocking — run in executor to keep
+    the event loop free to flush WebSocket messages.
+    """
+
+    prompt = build_prompt(processed_text)
 
     try:
-        client = ollama.AsyncClient()
+        loop = asyncio.get_event_loop()
 
-        chat_gen = await client.chat(
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt
+            )
+        )
+
+        text = response.text
+
+        # Simulate streaming word by word
+        for chunk in text.split(" "):
+            yield chunk + " "
+
+    except Exception as e:
+        logger.error(f"[Gemini Error]: {e}")
+        raise e
+
+
+# ---------------- GRANITE (REAL STREAMING) ----------------
+async def granite_stream(processed_text: str):
+    prompt = build_prompt(processed_text)
+
+    try:
+        ollama_client = ollama.AsyncClient()
+
+        chat_gen = await ollama_client.chat(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             stream=True
@@ -63,43 +90,21 @@ async def granite_stream(ehr_text: str):
         raise e
 
 
-async def gemini_stream(ehr_text: str):
-    """Fallback Gemini."""
-    processed = preprocess_ehr(ehr_text)
-    prompt = build_prompt(processed)
-
-    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# ---------------- MAIN ----------------
+async def generate_summary_stream(processed_text: str):
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        yield response.text
-
-    except Exception as e:
-        logger.error(f"[Gemini Error]: {e}")
-        raise e
-
-
-async def generate_summary_stream(ehr_text: str):
-    """
-    Main pipeline:
-    Granite → Gemini → fallback error.
-    """
-    try:
-        async for chunk in granite_stream(ehr_text):
+        async for chunk in gemini_stream(processed_text):
             yield chunk
         return
     except Exception:
-        logger.warning("Granite failed. Switching to Gemini.")
+        logger.warning("Gemini failed → switching to Granite")
 
     try:
-        async for chunk in gemini_stream(ehr_text):
+        async for chunk in granite_stream(processed_text):
             yield chunk
         return
     except Exception:
-        logger.error("Gemini also failed.")
+        logger.error("Both models failed")
 
-    yield "[Error]: Unable to generate summary."
+    yield "[Error]: Could not generate summary"

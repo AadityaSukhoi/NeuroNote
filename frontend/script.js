@@ -1,82 +1,102 @@
-const btn = document.getElementById("summarizeBtn");
-const output = document.getElementById("output");
-const status = document.getElementById("status");
-const downloadBtn = document.getElementById("downloadPdfBtn");
+lucide.createIcons();
 
-let socket;
+let fullMarkdown = "";
+let socket = null;
 
-// Connect WebSocket
-function connectWebSocket() {
-  socket = new WebSocket("ws://localhost:8000/ws/summarize");
+async function processEHR() {
+    const input = document.getElementById('ehr-input').innerText.trim();
+    if (!input) return;
 
-  socket.onopen = () => {
-    status.textContent = "● Connected";
-    status.style.color = "lime";
-  };
+    fullMarkdown = "";
 
-  socket.onclose = () => {
-    status.textContent = "● Disconnected";
-    status.style.color = "red";
-  };
+    document.getElementById('input-layer').classList.remove('active');
+    document.getElementById('status-text').textContent = "Synthesizing";
 
-  socket.onerror = () => {
-    status.textContent = "● Error";
-    status.style.color = "orange";
-  };
+    const output = document.getElementById('markdown-output');
+    const cloud = document.getElementById('entity-cloud');
 
-  socket.onmessage = (event) => {
-    output.textContent += event.data;
-    output.scrollTop = output.scrollHeight;
-  };
+    output.innerHTML = "";
+    cloud.innerHTML = "";
+
+    if (socket) socket.close();
+
+    socket = new WebSocket('ws://127.0.0.1:8000/ws/summarize');
+
+    socket.onopen = () => {
+        console.log("WS CONNECTED");
+        socket.send(JSON.stringify({ text: input }));
+    };
+
+    socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        // ---------------- ENTITIES ----------------
+        if (msg.type === "entities") {
+            const entities = msg.data;
+
+            const addTag = (text, cls) => {
+                const el = document.createElement('span');
+                el.className = `ent-tag ${cls}`;
+                el.textContent = text;
+                cloud.appendChild(el);
+            };
+
+            entities.persons?.forEach(p => addTag(p, "ent-person"));
+            entities.dates?.forEach(d => addTag(d, "ent-date"));
+            entities.medications?.forEach(m => addTag(m, "ent-med"));
+            entities.conditions?.forEach(c => addTag(c, "ent-med"));
+            entities.labs?.forEach(l => addTag(l, "ent-med"));
+            entities.vitals?.forEach(v => addTag(v, "ent-med"));
+
+            // ✅ FIX: hide input layer fully first
+            const inputLayer = document.getElementById('input-layer');
+            inputLayer.style.display = 'none';
+            inputLayer.classList.remove('active');
+
+            // ✅ FIX: make result layer block FIRST, then add active on next frame
+            // so CSS transition from opacity:0 → 1 actually fires
+            const resultLayer = document.getElementById('result-layer');
+            resultLayer.style.display = 'block';
+
+            // Force a reflow so the browser registers display:block 
+            // before the opacity transition starts
+            resultLayer.getBoundingClientRect(); // ← triggers reflow
+
+            resultLayer.classList.add('active'); // now opacity:0 → 1 transitions properly
+        }
+
+        // ---------------- STREAM ----------------
+        if (msg.type === "token") {
+            fullMarkdown += msg.data;
+            output.innerHTML = marked.parse(fullMarkdown);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        // ---------------- DONE ----------------
+        if (msg.type === "done") {
+            console.log("Streaming finished");
+            document.getElementById('status-text').textContent = "Complete";
+            lucide.createIcons();
+        }
+
+        // ---------------- ERROR ----------------
+        if (msg.type === "error") {
+            console.error("Backend error:", msg.data);
+            document.getElementById('status-text').textContent = "Error";
+        }
+    };
+
+    socket.onclose = () => {
+        lucide.createIcons();
+    };
+
+    socket.onerror = (err) => {
+        console.error("WS ERROR", err);
+        document.getElementById('status-text').textContent = "Error";
+    };
 }
 
-// Generate summary
-btn.addEventListener("click", () => {
-  const text = document.getElementById("ehrInput").value;
-
-  if (!text.trim()) {
-    alert("Enter EHR data boss 😤");
-    return;
-  }
-
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    connectWebSocket();
-
-    setTimeout(() => {
-      output.textContent = "";
-      socket.send(text);
-    }, 500);
-  } else {
-    output.textContent = "";
-    socket.send(text);
-  }
-});
-
-// PDF Download
-downloadBtn.addEventListener("click", () => {
-  const { jsPDF } = window.jspdf;
-
-  let text = output.textContent;
-
-  if (!text.trim()) {
-    alert("No summary to download 😅");
-    return;
-  }
-
-  const doc = new jsPDF();
-
-  // Title
-  doc.setFontSize(16);
-  doc.text("NeuroNote - EHR Summary", 10, 10);
-
-  // Body
-  doc.setFontSize(11);
-  const lines = doc.splitTextToSize(text, 180);
-
-  doc.text(lines, 10, 20);
-
-  doc.save("EHR_Summary.pdf");
-});
-
-// Auto connect
-connectWebSocket();
+function copyText() {
+    const text = document.getElementById('markdown-output').innerText;
+    navigator.clipboard.writeText(text);
+}
